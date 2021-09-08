@@ -348,8 +348,7 @@ final class CoCart {
 	 */
 	public static function session_handler( $handler ) {
 		if ( class_exists( 'WC_Session' ) ) {
-			include_once COCART_ABSPATH . 'includes/abstracts/abstract-cocart-session.php';
-			include_once COCART_ABSPATH . 'includes/class-cocart-session-handler.php';
+			include COCART_ABSPATH . 'includes/class-cocart-session-handler.php';
 			$handler = 'CoCart_Session_Handler';
 		}
 
@@ -362,10 +361,11 @@ final class CoCart {
 	 * @access  public
 	 * @static
 	 * @since   2.1.2
-	 * @version 3.0.0
+	 * @version 3.1.0
 	 * @return  void
 	 */
 	public static function woocommerce() {
+		include_once COCART_ABSPATH . 'includes/abstracts/abstract-cocart-session.php';
 		include_once COCART_ABSPATH . 'includes/class-cocart-woocommerce.php';
 	} // END woocommerce()
 

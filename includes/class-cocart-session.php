@@ -86,11 +86,6 @@ class CoCart_API_Session {
 	 * @version 3.1.0
 	 */
 	public static function cleanup_carts() {
-		if ( ! class_exists( 'CoCart_Session_Handler' ) ) {
-			include_once COCART_ABSPATH . 'includes/abstracts/abstract-cocart-session.php';
-			include_once COCART_ABSPATH . 'includes/class-cocart-session-handler.php';
-		}
-
 		$session = new CoCart_Session_Handler();
 
 		if ( is_callable( array( $session, 'cleanup_sessions' ) ) ) {
