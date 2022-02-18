@@ -57,6 +57,120 @@ class CoCart_Add_Items_v2_Controller extends CoCart_Add_Item_Controller {
 			)
 		);
 	} // register_routes()
+/**
+	 * Add to Cart.
+	 *
+	 * @throws  CoCart_Data_Exception Exception if invalid data is detected.
+	 *
+	 * @access  public
+	 * @since   1.0.0
+	 * @version 3.1.0
+	 * @param   WP_REST_Request $request Full details about the request.
+	 * @return  WP_REST_Response
+	 */
+	public function add_to_cart( $request = array() ) {
+		try {
+			$product_id = ! isset( $request['id'] ) ? 0 : wc_clean( wp_unslash( $request['id'] ) );
+			$quantity   = ! isset( $request['quantity'] ) ? 1 : wc_clean( wp_unslash( $request['quantity'] ) );
+			$variation  = ! isset( $request['variation'] ) ? array() : $request['variation'];
+			$item_data  = ! isset( $request['item_data'] ) ? array() : $request['item_data'];
+
+			$controller = new CoCart_Cart_V2_Controller();
+
+			// Validate product ID before continuing and return correct product ID if different.
+			$product_id = $controller->validate_product_id( $product_id );
+
+			// Return error response if product ID is not found.
+			if ( is_wp_error( $product_id ) ) {
+				return $product_id;
+			}
+
+			// The product we are attempting to add to the cart.
+			$adding_to_cart = wc_get_product( $product_id );
+			$adding_to_cart = $controller->validate_product_for_cart( $adding_to_cart );
+
+			// Return error response if product cannot be added to cart?
+			if ( is_wp_error( $adding_to_cart ) ) {
+				return $adding_to_cart;
+			}
+
+			// Filters additional requested data.
+			$request = $controller->filter_request_data( $request );
+
+			// Validate quantity before continuing and return formatted.
+			$quantity = $controller->validate_quantity( $quantity, $adding_to_cart );
+
+			if ( is_wp_error( $quantity ) ) {
+				return $quantity;
+			}
+
+			// Add to cart handlers.
+			$add_to_cart_handler = apply_filters( 'cocart_add_to_cart_handler', $adding_to_cart->get_type(), $adding_to_cart );
+
+			if ( 'variable' === $add_to_cart_handler || 'variation' === $add_to_cart_handler ) {
+				$was_added_to_cart = $this->add_to_cart_handler_variable( $product_id, $quantity, null, $variation, $item_data, $request );
+			} elseif ( has_filter( 'cocart_add_to_cart_handler_' . $add_to_cart_handler ) ) {
+				$was_added_to_cart = apply_filters( 'cocart_add_to_cart_handler_' . $add_to_cart_handler, $adding_to_cart, $request ); // Custom handler.
+			} else {
+				$was_added_to_cart = $this->add_to_cart_handler_simple( $product_id, $quantity, $item_data, $request );
+			}
+
+			if ( ! is_wp_error( $was_added_to_cart ) ) {
+				/**
+				 * Set customers billing email address.
+				 *
+				 * @since 3.1.0
+				 */
+				if ( isset( $request['email'] ) ) {
+					WC()->customer->set_props(
+						array(
+							'billing_email' => trim( esc_html( $request['email'] ) ),
+						)
+					);
+				}
+
+				cocart_add_to_cart_message( array( $was_added_to_cart['product_id'] => $was_added_to_cart['quantity'] ) );
+
+				/**
+				 * Override cart item for anything extra.
+				 *
+				 * DEVELOPER WARNING: THIS FILTER CAN CAUSE HAVOC SO BE CAREFUL WHEN USING IT!
+				 *
+				 * @since 3.1.0
+				 */
+				$was_added_to_cart = apply_filters( 'cocart_override_cart_item', $was_added_to_cart, $request );
+
+				/**
+				 * Cache cart item.
+				 *
+				 * @since 3.1.0
+				 */
+				$controller->cache_cart_item( $was_added_to_cart );
+
+				/**
+				 * Calculate the totals again here incase of custom data applied
+				 * like a change of price for example so the response is upto date
+				 * when returned.
+				 *
+				 * @since 3.1.0
+				 */
+				$controller->calculate_totals();
+
+				// Was it requested to return the item details after being added?
+				if ( isset( $request['return_item'] ) && is_bool( $request['return_item'] ) && $request['return_item'] ) {
+					$response = $controller->get_item( $was_added_to_cart['data'], $was_added_to_cart, $was_added_to_cart['key'], true );
+				} else {
+					$response = $controller->get_cart_contents( $request );
+				}
+
+				return CoCart_Response::get_response( $response, $this->namespace, $this->rest_base );
+			}
+
+			return $was_added_to_cart;
+		} catch ( CoCart_Data_Exception $e ) {
+			return CoCart_Response::get_error_response( $e->getErrorCode(), $e->getMessage(), $e->getCode(), $e->getAdditionalData() );
+		}
+	} // END add_to_cart()
 
 	/**
 	 * Add other bundled or grouped products to Cart.
@@ -168,9 +282,9 @@ class CoCart_Add_Items_v2_Controller extends CoCart_Add_Item_Controller {
 					}
 
 					$quantity_set = true;
-
+					var_dump($request["item_data"][$item]);
 					// Product validation.
-					$product_to_add = $controller->validate_product( $item, $quantity, 0, array(), array(), 'grouped', $request );
+					$product_to_add = $controller->validate_product( $item, $quantity, 0, array(), $request["item_data"][$item], 'grouped', $request );
 
 					/**
 					 * If validation failed then return error response.
