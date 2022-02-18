@@ -45,7 +45,7 @@ If you are looking for documentation, head over here: [https://docs.cocart.xyz](
 
 <br>
 
-## The API
+## The API.
 
 CoCart Lite provides the basic API needs to get you started.
 
