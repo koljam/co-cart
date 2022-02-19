@@ -57,120 +57,6 @@ class CoCart_Add_Items_v2_Controller extends CoCart_Add_Item_Controller {
 			)
 		);
 	} // register_routes()
-/**
-	 * Add to Cart.
-	 *
-	 * @throws  CoCart_Data_Exception Exception if invalid data is detected.
-	 *
-	 * @access  public
-	 * @since   1.0.0
-	 * @version 3.1.0
-	 * @param   WP_REST_Request $request Full details about the request.
-	 * @return  WP_REST_Response
-	 */
-	public function add_to_cart( $request = array() ) {
-		try {
-			$product_id = ! isset( $request['id'] ) ? 0 : wc_clean( wp_unslash( $request['id'] ) );
-			$quantity   = ! isset( $request['quantity'] ) ? 1 : wc_clean( wp_unslash( $request['quantity'] ) );
-			$variation  = ! isset( $request['variation'] ) ? array() : $request['variation'];
-			$item_data  = ! isset( $request['item_data'] ) ? array() : $request['item_data'];
-
-			$controller = new CoCart_Cart_V2_Controller();
-
-			// Validate product ID before continuing and return correct product ID if different.
-			$product_id = $controller->validate_product_id( $product_id );
-
-			// Return error response if product ID is not found.
-			if ( is_wp_error( $product_id ) ) {
-				return $product_id;
-			}
-
-			// The product we are attempting to add to the cart.
-			$adding_to_cart = wc_get_product( $product_id );
-			$adding_to_cart = $controller->validate_product_for_cart( $adding_to_cart );
-
-			// Return error response if product cannot be added to cart?
-			if ( is_wp_error( $adding_to_cart ) ) {
-				return $adding_to_cart;
-			}
-
-			// Filters additional requested data.
-			$request = $controller->filter_request_data( $request );
-
-			// Validate quantity before continuing and return formatted.
-			$quantity = $controller->validate_quantity( $quantity, $adding_to_cart );
-
-			if ( is_wp_error( $quantity ) ) {
-				return $quantity;
-			}
-
-			// Add to cart handlers.
-			$add_to_cart_handler = apply_filters( 'cocart_add_to_cart_handler', $adding_to_cart->get_type(), $adding_to_cart );
-
-			if ( 'variable' === $add_to_cart_handler || 'variation' === $add_to_cart_handler ) {
-				$was_added_to_cart = $this->add_to_cart_handler_variable( $product_id, $quantity, null, $variation, $item_data, $request );
-			} elseif ( has_filter( 'cocart_add_to_cart_handler_' . $add_to_cart_handler ) ) {
-				$was_added_to_cart = apply_filters( 'cocart_add_to_cart_handler_' . $add_to_cart_handler, $adding_to_cart, $request ); // Custom handler.
-			} else {
-				$was_added_to_cart = $this->add_to_cart_handler_simple( $product_id, $quantity, $item_data, $request );
-			}
-
-			if ( ! is_wp_error( $was_added_to_cart ) ) {
-				/**
-				 * Set customers billing email address.
-				 *
-				 * @since 3.1.0
-				 */
-				if ( isset( $request['email'] ) ) {
-					WC()->customer->set_props(
-						array(
-							'billing_email' => trim( esc_html( $request['email'] ) ),
-						)
-					);
-				}
-
-				cocart_add_to_cart_message( array( $was_added_to_cart['product_id'] => $was_added_to_cart['quantity'] ) );
-
-				/**
-				 * Override cart item for anything extra.
-				 *
-				 * DEVELOPER WARNING: THIS FILTER CAN CAUSE HAVOC SO BE CAREFUL WHEN USING IT!
-				 *
-				 * @since 3.1.0
-				 */
-				$was_added_to_cart = apply_filters( 'cocart_override_cart_item', $was_added_to_cart, $request );
-
-				/**
-				 * Cache cart item.
-				 *
-				 * @since 3.1.0
-				 */
-				$controller->cache_cart_item( $was_added_to_cart );
-
-				/**
-				 * Calculate the totals again here incase of custom data applied
-				 * like a change of price for example so the response is upto date
-				 * when returned.
-				 *
-				 * @since 3.1.0
-				 */
-				$controller->calculate_totals();
-
-				// Was it requested to return the item details after being added?
-				if ( isset( $request['return_item'] ) && is_bool( $request['return_item'] ) && $request['return_item'] ) {
-					$response = $controller->get_item( $was_added_to_cart['data'], $was_added_to_cart, $was_added_to_cart['key'], true );
-				} else {
-					$response = $controller->get_cart_contents( $request );
-				}
-
-				return CoCart_Response::get_response( $response, $this->namespace, $this->rest_base );
-			}
-
-			return $was_added_to_cart;
-		} catch ( CoCart_Data_Exception $e ) {
-			return CoCart_Response::get_error_response( $e->getErrorCode(), $e->getMessage(), $e->getCode(), $e->getAdditionalData() );
-		}
-	} // END add_to_cart()
 
 	/**
 	 * Add other bundled or grouped products to Cart.
@@ -185,6 +71,11 @@ class CoCart_Add_Items_v2_Controller extends CoCart_Add_Item_Controller {
 	 */
 	public function add_items_to_cart( $request = array() ) {
 		try {
+
+			if(isset( $request['clear_cart'] )){
+				$this->clear_cart();
+			}
+
 			$product_id = ! isset( $request['id'] ) ? 0 : wc_clean( wp_unslash( $request['id'] ) );
 			$items      = isset( $request['quantity'] ) && is_array( $request['quantity'] ) ? wp_unslash( $request['quantity'] ) : array();
 
@@ -282,7 +173,7 @@ class CoCart_Add_Items_v2_Controller extends CoCart_Add_Item_Controller {
 					}
 
 					$quantity_set = true;
-					var_dump($request["item_data"][$item]);
+
 					// Product validation.
 					$product_to_add = $controller->validate_product( $item, $quantity, 0, array(), $request["item_data"][$item], 'grouped', $request );
 
@@ -299,8 +190,9 @@ class CoCart_Add_Items_v2_Controller extends CoCart_Add_Item_Controller {
 					remove_action( 'woocommerce_add_to_cart', array( WC()->cart, 'calculate_totals' ), 20, 0 );
 
 					// Add item to cart once validation is passed.
-					$item_added = $this->add_item_to_cart( $product_to_add );
-
+					$item_added = $this->add_to_cart_handler_simple( $item, $quantity, $request["item_data"][$item], $request );
+					// $this->add_item_to_cart( $product_to_add );
+					
 					if ( false !== $item_added ) {
 						$was_added_to_cart      = true;
 						$added_to_cart[ $item ] = $item_added;
@@ -422,5 +314,114 @@ class CoCart_Add_Items_v2_Controller extends CoCart_Add_Item_Controller {
 
 		return $params;
 	} // END get_collection_params()
+
+	/**
+	 * Clears the cart.
+	 *
+	 * @throws CoCart_Data_Exception Exception if invalid data is detected.
+	 *
+	 * @access  public
+	 * @since   1.0.0
+	 * @version 3.1.0
+	 * @param   WP_REST_Request $request - Full details about the request.
+	 * @return  WP_REST_Response
+	 */
+	public function clear_cart( $request = array() ) {
+		try {
+			// We need the cart key to force a session save later.
+			$cart_key = WC()->session->get_customer_unique_id();
+
+			do_action( 'cocart_before_cart_emptied' );
+
+			// Clear all cart fees via session as we cant do it via the fee api.
+			WC()->session->set( 'cart_fees', array() );
+
+			// Clear cart.
+			WC()->cart->cart_contents = array();
+			WC()->session->cart       = array();
+
+			// Clear removed items if not kept.
+			if ( ! $request['keep_removed_items'] ) {
+				WC()->cart->removed_cart_contents = array();
+			}
+
+			// Reset everything.
+			WC()->cart->shipping_methods           = array();
+			WC()->cart->coupon_discount_totals     = array();
+			WC()->cart->coupon_discount_tax_totals = array();
+			WC()->cart->applied_coupons            = array();
+			WC()->cart->totals                     = array(
+				'subtotal'            => 0,
+				'subtotal_tax'        => 0,
+				'shipping_total'      => 0,
+				'shipping_tax'        => 0,
+				'shipping_taxes'      => array(),
+				'discount_total'      => 0,
+				'discount_tax'        => 0,
+				'cart_contents_total' => 0,
+				'cart_contents_tax'   => 0,
+				'cart_contents_taxes' => array(),
+				'fee_total'           => 0,
+				'fee_tax'             => 0,
+				'fee_taxes'           => array(),
+				'total'               => 0,
+				'total_tax'           => 0,
+			);
+
+			/**
+			 * If the user is authorized and `woocommerce_persistent_cart_enabled` filter is left enabled
+			 * then we will delete the persistent cart as well.
+			 */
+			if ( get_current_user_id() && apply_filters( 'woocommerce_persistent_cart_enabled', true ) ) {
+				delete_user_meta( get_current_user_id(), '_woocommerce_persistent_cart_' . get_current_blog_id() );
+			}
+
+			do_action( 'cocart_cart_emptied' );
+
+			/**
+			 * We force the session to update in the database as we
+			 * cannot wait for PHP to shutdown to trigger the save
+			 * should it fail to do so later.
+			 */
+			WC()->session->update_cart( $cart_key );
+
+			if ( WC()->cart->is_empty() ) {
+				do_action( 'cocart_cart_cleared' );
+
+				$message = __( 'Cart is cleared.', 'cart-rest-api-for-woocommerce' );
+
+				/**
+				 * Filters message about the cart being cleared.
+				 *
+				 * @since 2.1.0
+				 * @param string $message Message.
+				 */
+				$message = apply_filters( 'cocart_cart_cleared_message', $message );
+
+				// Add notice.
+				wc_add_notice( $message );
+
+				// Return cart response.
+				$controller = new CoCart_Cart_V2_Controller();
+				$response   = $controller->get_cart_contents( $request );
+
+				return CoCart_Response::get_response( $response, $this->namespace, $this->rest_base );
+			} else {
+				$message = __( 'Clearing the cart failed!', 'cart-rest-api-for-woocommerce' );
+
+				/**
+				 * Filters message about the cart failing to clear.
+				 *
+				 * @since 2.1.0
+				 * @param string $message Message.
+				 */
+				$message = apply_filters( 'cocart_clear_cart_failed_message', $message );
+
+				throw new CoCart_Data_Exception( 'cocart_clear_cart_failed', $message, 404 );
+			}
+		} catch ( CoCart_Data_Exception $e ) {
+			return CoCart_Response::get_error_response( $e->getErrorCode(), $e->getMessage(), $e->getCode(), $e->getAdditionalData() );
+		}
+	} // END clear_cart()
 
 } // END class
